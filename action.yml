@@ -1,11 +1,26 @@
-name: 'Your name here'
-description: 'Provide a description here'
-author: 'Your name or organization here'
+name: 'Line of Code Dif'
+description: ''
+author: 'alexcheuk'
 inputs:
-  milliseconds: # change this
-    required: true
-    description: 'input description here'
-    default: 'default value if applicable'
+  token:
+    description: >
+      Personal access token (PAT) used to fetch the repository. The PAT is configured
+      with the local git config, which enables your scripts to run authenticated git
+      commands. The post-job step removes the PAT.
+      We recommend using a service account with the least permissions necessary.
+      Also when generating a new PAT, select the least scopes necessary.
+      [Learn more about creating and using encrypted secrets](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/creating-and-using-encrypted-secrets)
+    default: ${{ github.token }}
+  slack_webhook:
+    description: Slack webhook
+  source_ref:
+    description: source ref
+  exclude_dir:
+    description: exclude dir
+  exclude_ext:
+    description: exclude ext
+  include_ext:
+    description: exclude ext
 runs:
   using: 'node12'
   main: 'dist/index.js'
