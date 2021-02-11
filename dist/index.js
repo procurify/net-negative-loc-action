@@ -2,7 +2,7 @@ require('./sourcemap-register.js');module.exports =
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 3109:
+/***/ 5008:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -39,11 +39,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.sendSlackMessage = exports.gitFetchRefs = exports.getClocFromRef = exports.clocFolder = void 0;
 const core = __importStar(__nccwpck_require__(2186));
-const github = __importStar(__nccwpck_require__(5438));
 const execa_1 = __importDefault(__nccwpck_require__(5447));
-const simple_git_1 = __importDefault(__nccwpck_require__(1477));
 const path_1 = __importDefault(__nccwpck_require__(5622));
+const simple_git_1 = __importDefault(__nccwpck_require__(1477));
+const node_fetch_1 = __importDefault(__nccwpck_require__(467));
 const git = simple_git_1.default();
 const clocFolder = (folder, excludeDir, excludeExt, includeExt) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -54,6 +55,7 @@ const clocFolder = (folder, excludeDir, excludeExt, includeExt) => __awaiter(voi
             options.push(`--exclude-dir=${excludeDir}`);
         if (excludeExt)
             options.push(`--exclude-ext=${excludeExt}`);
+        core.info(`cloc ${[...options, '--json', folder].join(' ')}`);
         const { stdout } = yield execa_1.default(path_1.default.resolve(__dirname, '../bin/cloc'), [
             ...options,
             '--json',
@@ -62,22 +64,248 @@ const clocFolder = (folder, excludeDir, excludeExt, includeExt) => __awaiter(voi
         return JSON.parse(stdout);
     }
     catch (e) {
-        return {};
+        return null;
     }
 });
+exports.clocFolder = clocFolder;
 const getClocFromRef = (ref) => __awaiter(void 0, void 0, void 0, function* () {
-    yield git.checkout(ref, ['-f']);
-    return clocFolder('.', core.getInput('exclude_dir') || '', core.getInput('exclude_ext') || '', core.getInput('include_ext') || '');
+    if (!ref)
+        return null;
+    try {
+        core.startGroup(`Get Cloc from: ${ref}`);
+        yield git.checkout(ref, ['-f']);
+        const cloc = yield exports.clocFolder(core.getInput('directory') || '.', core.getInput('exclude_dir') || '', core.getInput('exclude_ext') || '', core.getInput('include_ext') || '');
+        if (cloc) {
+            delete cloc.header;
+        }
+        core.info(JSON.stringify(cloc));
+        core.endGroup();
+        return cloc;
+    }
+    catch (_a) {
+        return null;
+    }
 });
+exports.getClocFromRef = getClocFromRef;
+const gitFetchRefs = (refs) => __awaiter(void 0, void 0, void 0, function* () {
+    core.startGroup('Fetching');
+    const fetchOptions = [
+        '--no-tags',
+        '--prune',
+        '--progress',
+        '--no-recurse-submodules',
+        '--depth=1',
+        `origin`
+    ];
+    for (const ref of refs) {
+        fetchOptions.push(...[
+            `+refs/tags/${ref}*:refs/tags/${ref}*`,
+            `+refs/heads/${ref}*:refs/remotes/origin/${ref}*`
+        ]);
+    }
+    core.info(`git fetch ${fetchOptions.join(' ')}`);
+    const fetchResults = yield git.fetch(fetchOptions);
+    core.debug(JSON.stringify(fetchResults));
+    core.endGroup();
+    return git.fetch(fetchOptions);
+});
+exports.gitFetchRefs = gitFetchRefs;
+const formatLocText = (loc) => {
+    if (loc > 0) {
+        return `+ ${Math.abs(loc)}`;
+    }
+    else if (loc < 0) {
+        return `- ${Math.abs(loc)}`;
+    }
+    else {
+        return loc.toString();
+    }
+};
+const diffCloc = (cloc1, cloc2) => {
+    const diff = {};
+    // eslint-disable-next-line github/array-foreach
+    Object.keys(cloc2).forEach(fileType => {
+        diff[fileType] = {
+            code: cloc2[fileType].code
+        };
+    });
+    // eslint-disable-next-line github/array-foreach
+    Object.keys(cloc1).forEach(fileType => {
+        if (!diff[fileType]) {
+            diff[fileType] = {
+                code: 0
+            };
+        }
+        diff[fileType].code = diff[fileType].code - cloc1[fileType].code;
+    });
+    return diff;
+};
+const generateDiffMessage = (cloc1, cloc2) => {
+    const diffClocObj = diffCloc(cloc1, cloc2);
+    return Object.keys(diffClocObj)
+        .filter(fileType => {
+        return diffClocObj[fileType].code !== 0 && fileType !== 'SUM';
+    })
+        .map(fileType => {
+        return {
+            type: 'section',
+            text: {
+                type: 'mrkdwn',
+                text: `${fileType}`
+            },
+            accessory: {
+                type: 'button',
+                text: {
+                    type: 'plain_text',
+                    text: formatLocText(diffClocObj[fileType].code)
+                },
+                style: diffClocObj[fileType].code < 0 ? 'primary' : 'danger'
+            }
+        };
+    });
+};
+const sendSlackMessage = ({ owner, repo, webhookUrl, latestReleaseTag, lastReleaseTag, checkpointTag, checkpointTitle = 'Checkpoint', diffLocFromLast, diffLocFromCheckpoint, clocLatest, clocLast, clocCheckpoint, showReleaseBreakdown, showCheckpointBreakdown }) => __awaiter(void 0, void 0, void 0, function* () {
+    core.info('Sending report to Slack');
+    const data = JSON.stringify({
+        text: `${latestReleaseTag} Released - Diff LoC: ${formatLocText(diffLocFromLast)}`,
+        blocks: [
+            {
+                type: 'section',
+                text: {
+                    type: 'mrkdwn',
+                    text: `*<https://github.com/${owner}/${repo}/releases/tag/${latestReleaseTag}|${latestReleaseTag}> Released - Net Negative Code Breakdown*`
+                }
+            },
+            {
+                type: 'divider'
+            },
+            {
+                type: 'context',
+                elements: [
+                    {
+                        type: 'mrkdwn',
+                        text: `*Summary*`
+                    }
+                ]
+            },
+            {
+                type: 'section',
+                fields: [
+                    {
+                        type: 'mrkdwn',
+                        text: `*Diff LoC from <https://github.com/${owner}/${repo}/compare/${lastReleaseTag}...${latestReleaseTag}|${lastReleaseTag}>:*\n${formatLocText(diffLocFromLast)}`
+                    },
+                    ...(checkpointTag && diffLocFromCheckpoint
+                        ? [
+                            {
+                                type: 'mrkdwn',
+                                text: `*Diff LoC since <https://github.com/${owner}/${repo}/releases/tag/${checkpointTag}|${checkpointTitle}>:*\n${formatLocText(diffLocFromCheckpoint)}`
+                            }
+                        ]
+                        : [])
+                ]
+            },
+            {
+                type: 'section',
+                fields: [
+                    {
+                        type: 'mrkdwn',
+                        text: `*Remaining Lines of Code*\n${clocLatest.SUM.code}`
+                    }
+                ]
+            },
+            ...(showReleaseBreakdown && diffLocFromLast !== 0
+                ? [
+                    {
+                        type: 'divider'
+                    },
+                    {
+                        type: 'context',
+                        elements: [
+                            {
+                                type: 'mrkdwn',
+                                text: `*Diff breakdown from <https://github.com/${owner}/${repo}/compare/${lastReleaseTag}...${latestReleaseTag}|${lastReleaseTag}>*`
+                            }
+                        ]
+                    },
+                    ...generateDiffMessage(clocLast, clocLatest)
+                ]
+                : []),
+            ...(showCheckpointBreakdown &&
+                diffLocFromCheckpoint !== 0 &&
+                clocCheckpoint
+                ? [
+                    {
+                        type: 'divider'
+                    },
+                    {
+                        type: 'context',
+                        elements: [
+                            {
+                                type: 'mrkdwn',
+                                text: `*Diff breakdown from <https://github.com/${owner}/${repo}/releases/tag/${checkpointTag}|${checkpointTitle}>*`
+                            }
+                        ]
+                    },
+                    ...generateDiffMessage(clocCheckpoint, clocLatest)
+                ]
+                : [])
+        ]
+    });
+    return node_fetch_1.default(webhookUrl, {
+        method: 'POST',
+        body: data,
+        headers: { 'Content-Type': 'application/json' }
+    });
+});
+exports.sendSlackMessage = sendSlackMessage;
+
+
+/***/ }),
+
+/***/ 3109:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(2186));
+const github = __importStar(__nccwpck_require__(5438));
+const helpers_1 = __nccwpck_require__(5008);
 function run() {
     var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
-        const myToken = core.getInput('token');
-        const octokit = github.getOctokit(myToken);
+        const octokit = github.getOctokit(core.getInput('token'));
         const owner = (_a = process.env.GITHUB_REPOSITORY) === null || _a === void 0 ? void 0 : _a.split('/')[0];
         const repo = (_b = process.env.GITHUB_REPOSITORY) === null || _b === void 0 ? void 0 : _b.split('/')[1];
-        core.info(owner);
-        core.info(repo);
         const releases = yield octokit.repos.listReleases({
             owner,
             repo,
@@ -85,17 +313,51 @@ function run() {
         });
         const latestReleaseTag = (_d = (_c = releases.data) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.tag_name;
         const lastReleaseTag = (_f = (_e = releases.data) === null || _e === void 0 ? void 0 : _e[1]) === null || _f === void 0 ? void 0 : _f.tag_name;
-        const fetch = yield git.fetch([
-            `origin`,
-            `+refs/tags/${latestReleaseTag}*:refs/tags/${latestReleaseTag}*`,
-            `+refs/heads/${latestReleaseTag}*:refs/remotes/origin/${latestReleaseTag}*`,
-            `+refs/tags/${lastReleaseTag}*:refs/tags/${lastReleaseTag}*`,
-            `+refs/heads/${lastReleaseTag}*:refs/remotes/origin/${lastReleaseTag}*`,
-            '--depth=1'
-        ]);
-        core.info(JSON.stringify(fetch));
-        core.info(JSON.stringify(yield getClocFromRef(latestReleaseTag)));
-        core.info(JSON.stringify(yield getClocFromRef(lastReleaseTag)));
+        const checkpointTag = core.getInput('checkpoint_tag');
+        /** Git fetch */
+        yield helpers_1.gitFetchRefs([latestReleaseTag, lastReleaseTag, checkpointTag]);
+        /** Calculate LoC Difference */
+        const latestCloc = yield helpers_1.getClocFromRef(latestReleaseTag);
+        const lastCloc = yield helpers_1.getClocFromRef(lastReleaseTag);
+        const checkpointCloc = yield helpers_1.getClocFromRef(checkpointTag);
+        if (!latestCloc || !lastCloc)
+            return;
+        const diffLocFromLast = latestCloc.SUM.code - lastCloc.SUM.code;
+        const diffLocFromCheckpoint = checkpointCloc
+            ? latestCloc.SUM.code - checkpointCloc.SUM.code
+            : 0;
+        const slackWebhook = core.getInput('slack_webhook');
+        if (slackWebhook) {
+            try {
+                yield helpers_1.sendSlackMessage({
+                    owner,
+                    repo,
+                    webhookUrl: slackWebhook,
+                    latestReleaseTag,
+                    lastReleaseTag,
+                    checkpointTag,
+                    checkpointTitle: core.getInput('checkpoint_title'),
+                    diffLocFromLast,
+                    diffLocFromCheckpoint,
+                    clocLatest: latestCloc,
+                    clocLast: lastCloc,
+                    clocCheckpoint: checkpointCloc || undefined,
+                    showReleaseBreakdown: core.getInput('slack_release_diff_breakdown') === 'true',
+                    showCheckpointBreakdown: core.getInput('slack_checkpoint_diff_breakdown') === 'true'
+                });
+            }
+            catch (_g) {
+                core.setFailed('Failed to send slack message');
+            }
+        }
+        core.startGroup('Export LOC');
+        core.info(`DIFF_LOC_CHECKPOINT=${diffLocFromCheckpoint}`);
+        core.info(`DIFF_LOC_RELEASE=${diffLocFromLast}`);
+        core.info(`DIFF_LOC_REMAINING=${latestCloc.SUM.code}`);
+        core.exportVariable('DIFF_LOC_CHECKPOINT', diffLocFromCheckpoint);
+        core.exportVariable('DIFF_LOC_RELEASE', diffLocFromLast);
+        core.exportVariable('DIFF_LOC_REMAINING', latestCloc.SUM.code);
+        core.endGroup();
     });
 }
 run();
@@ -1704,7 +1966,7 @@ exports.Octokit = Octokit;
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 
-var isPlainObject = __nccwpck_require__(558);
+var isPlainObject = __nccwpck_require__(3287);
 var universalUserAgent = __nccwpck_require__(5030);
 
 function lowercaseKeys(object) {
@@ -2090,52 +2352,6 @@ const endpoint = withDefaults(null, DEFAULTS);
 
 exports.endpoint = endpoint;
 //# sourceMappingURL=index.js.map
-
-
-/***/ }),
-
-/***/ 558:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-
-/*!
- * is-plain-object <https://github.com/jonschlinkert/is-plain-object>
- *
- * Copyright (c) 2014-2017, Jon Schlinkert.
- * Released under the MIT License.
- */
-
-function isObject(o) {
-  return Object.prototype.toString.call(o) === '[object Object]';
-}
-
-function isPlainObject(o) {
-  var ctor,prot;
-
-  if (isObject(o) === false) return false;
-
-  // If has modified constructor
-  ctor = o.constructor;
-  if (ctor === undefined) return true;
-
-  // If has modified prototype
-  prot = ctor.prototype;
-  if (isObject(prot) === false) return false;
-
-  // If constructor does not have an Object-specific method
-  if (prot.hasOwnProperty('isPrototypeOf') === false) {
-    return false;
-  }
-
-  // Most likely a plain Object
-  return true;
-}
-
-exports.isPlainObject = isPlainObject;
 
 
 /***/ }),
@@ -3625,7 +3841,7 @@ function _interopDefault (ex) { return (ex && (typeof ex === 'object') && 'defau
 
 var endpoint = __nccwpck_require__(9440);
 var universalUserAgent = __nccwpck_require__(5030);
-var isPlainObject = __nccwpck_require__(9062);
+var isPlainObject = __nccwpck_require__(3287);
 var nodeFetch = _interopDefault(__nccwpck_require__(467));
 var requestError = __nccwpck_require__(537);
 
@@ -3765,52 +3981,6 @@ const request = withDefaults(endpoint.endpoint, {
 
 exports.request = request;
 //# sourceMappingURL=index.js.map
-
-
-/***/ }),
-
-/***/ 9062:
-/***/ ((__unused_webpack_module, exports) => {
-
-"use strict";
-
-
-Object.defineProperty(exports, "__esModule", ({ value: true }));
-
-/*!
- * is-plain-object <https://github.com/jonschlinkert/is-plain-object>
- *
- * Copyright (c) 2014-2017, Jon Schlinkert.
- * Released under the MIT License.
- */
-
-function isObject(o) {
-  return Object.prototype.toString.call(o) === '[object Object]';
-}
-
-function isPlainObject(o) {
-  var ctor,prot;
-
-  if (isObject(o) === false) return false;
-
-  // If has modified constructor
-  ctor = o.constructor;
-  if (ctor === undefined) return true;
-
-  // If has modified prototype
-  prot = ctor.prototype;
-  if (isObject(prot) === false) return false;
-
-  // If constructor does not have an Object-specific method
-  if (prot.hasOwnProperty('isPrototypeOf') === false) {
-    return false;
-  }
-
-  // Most likely a plain Object
-  return true;
-}
-
-exports.isPlainObject = isPlainObject;
 
 
 /***/ }),
@@ -4297,7 +4467,7 @@ module.exports = readShebang;
 
 const path = __nccwpck_require__(5622);
 const which = __nccwpck_require__(4207);
-const getPathKey = __nccwpck_require__(9060);
+const getPathKey = __nccwpck_require__(539);
 
 function resolveCommandAttempt(parsed, withoutPathExt) {
     const env = parsed.options.env || process.env;
@@ -4345,30 +4515,6 @@ function resolveCommand(parsed) {
 }
 
 module.exports = resolveCommand;
-
-
-/***/ }),
-
-/***/ 9060:
-/***/ ((module) => {
-
-"use strict";
-
-
-const pathKey = (options = {}) => {
-	const environment = options.env || process.env;
-	const platform = options.platform || process.platform;
-
-	if (platform !== 'win32') {
-		return 'PATH';
-	}
-
-	return Object.keys(environment).reverse().find(key => key.toUpperCase() === 'PATH') || 'Path';
-};
-
-module.exports = pathKey;
-// TODO: Remove this for the next major release
-module.exports.default = pathKey;
 
 
 /***/ }),
@@ -6542,6 +6688,52 @@ return{name,number,description,supported,action,forced,standard};
 
 /***/ }),
 
+/***/ 3287:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+
+/*!
+ * is-plain-object <https://github.com/jonschlinkert/is-plain-object>
+ *
+ * Copyright (c) 2014-2017, Jon Schlinkert.
+ * Released under the MIT License.
+ */
+
+function isObject(o) {
+  return Object.prototype.toString.call(o) === '[object Object]';
+}
+
+function isPlainObject(o) {
+  var ctor,prot;
+
+  if (isObject(o) === false) return false;
+
+  // If has modified constructor
+  ctor = o.constructor;
+  if (ctor === undefined) return true;
+
+  // If has modified prototype
+  prot = ctor.prototype;
+  if (isObject(prot) === false) return false;
+
+  // If constructor does not have an Object-specific method
+  if (prot.hasOwnProperty('isPrototypeOf') === false) {
+    return false;
+  }
+
+  // Most likely a plain Object
+  return true;
+}
+
+exports.isPlainObject = isPlainObject;
+
+
+/***/ }),
+
 /***/ 1554:
 /***/ ((module) => {
 
@@ -8642,7 +8834,7 @@ exports.FetchError = FetchError;
 "use strict";
 
 const path = __nccwpck_require__(5622);
-const pathKey = __nccwpck_require__(7278);
+const pathKey = __nccwpck_require__(539);
 
 const npmRunPath = options => {
 	options = {
@@ -8687,30 +8879,6 @@ module.exports.env = options => {
 
 	return env;
 };
-
-
-/***/ }),
-
-/***/ 7278:
-/***/ ((module) => {
-
-"use strict";
-
-
-const pathKey = (options = {}) => {
-	const environment = options.env || process.env;
-	const platform = options.platform || process.platform;
-
-	if (platform !== 'win32') {
-		return 'PATH';
-	}
-
-	return Object.keys(environment).reverse().find(key => key.toUpperCase() === 'PATH') || 'Path';
-};
-
-module.exports = pathKey;
-// TODO: Remove this for the next major release
-module.exports.default = pathKey;
 
 
 /***/ }),
@@ -8812,6 +8980,30 @@ module.exports.callCount = function_ => {
 
 	return calledFunctions.get(function_);
 };
+
+
+/***/ }),
+
+/***/ 539:
+/***/ ((module) => {
+
+"use strict";
+
+
+const pathKey = (options = {}) => {
+	const environment = options.env || process.env;
+	const platform = options.platform || process.platform;
+
+	if (platform !== 'win32') {
+		return 'PATH';
+	}
+
+	return Object.keys(environment).reverse().find(key => key.toUpperCase() === 'PATH') || 'Path';
+};
+
+module.exports = pathKey;
+// TODO: Remove this for the next major release
+module.exports.default = pathKey;
 
 
 /***/ }),

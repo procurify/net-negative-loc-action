@@ -1,105 +1,46 @@
+# Net Negative Lines of Code
+![build-test](https://github.com/procurify/net-negative-loc-action/workflows/build-test/badge.svg)
+
+This action allows you to get a report of the net negative lines of code per release.
+At Procurify, we use this to keep track of our Angular to React migration and Java to Kotlin migration.
+
 <p align="center">
-  <a href="https://github.com/actions/typescript-action/actions"><img alt="typescript-action status" src="https://github.com/actions/typescript-action/workflows/build-test/badge.svg"></a>
+  <img alt="Slack Example" src="images/slack-example.png?raw=true">
 </p>
 
-# Create a JavaScript Action using TypeScript
-
-Use this template to bootstrap the creation of a TypeScript action.:rocket:
-
-This template includes compilation support, tests, a validation workflow, publishing, and versioning guidance.  
-
-If you are new, there's also a simpler introduction.  See the [Hello World JavaScript Action](https://github.com/actions/hello-world-javascript-action)
-
-## Create an action from this template
-
-Click the `Use this Template` and provide the new repo details for your action
-
-## Code in Main
-
-> First, you'll need to have a reasonably modern version of `node` handy. This won't work with versions older than 9, for instance.
-
-Install the dependencies  
-```bash
-$ npm install
-```
-
-Build the typescript and package it for distribution
-```bash
-$ npm run build && npm run package
-```
-
-Run the tests :heavy_check_mark:  
-```bash
-$ npm test
-
- PASS  ./index.test.js
-  ✓ throws invalid number (3ms)
-  ✓ wait 500 ms (504ms)
-  ✓ test runs (95ms)
-
-...
-```
-
-## Change action.yml
-
-The action.yml contains defines the inputs and output for your action.
-
-Update the action.yml with your name, description, inputs and outputs for your action.
-
-See the [documentation](https://help.github.com/en/articles/metadata-syntax-for-github-actions)
-
-## Change the Code
-
-Most toolkit and CI/CD operations involve async operations so the action is run in an async function.
-
-```javascript
-import * as core from '@actions/core';
-...
-
-async function run() {
-  try { 
-      ...
-  } 
-  catch (error) {
-    core.setFailed(error.message);
-  }
-}
-
-run()
-```
-
-See the [toolkit documentation](https://github.com/actions/toolkit/blob/master/README.md#packages) for the various packages.
-
-## Publish to a distribution branch
-
-Actions are run from GitHub repos so we will checkin the packed dist folder. 
-
-Then run [ncc](https://github.com/zeit/ncc) and push the results:
-```bash
-$ npm run package
-$ git add dist
-$ git commit -a -m "prod dependencies"
-$ git push origin releases/v1
-```
-
-Note: We recommend using the `--license` option for ncc, which will create a license file for all of the production node modules used in your project.
-
-Your action is now published! :rocket: 
-
-See the [versioning documentation](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md)
-
-## Validate
-
-You can now validate the action by referencing `./` in a workflow in your repo (see [test.yml](.github/workflows/test.yml))
-
+## Usage
 ```yaml
-uses: ./
-with:
-  milliseconds: 1000
+on:
+  release:
+    types:
+      - created
+
+jobs:
+  report-angular:
+    name: Report Net Negative Lines of Code
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Report Net Negative Lines of Code
+        uses: procurify/net-negative-loc-action@v1
+        with:
+          token: ${{ github.token }}
+          slack_webhook: ${{ secrets.SLACK_WEBHOOK }}
+          directory: './packages/angular'
 ```
 
-See the [actions tab](https://github.com/actions/typescript-action/actions) for runs of this action! :rocket:
-
-## Usage:
-
-After testing you can [create a v1 tag](https://github.com/actions/toolkit/blob/master/docs/action-versioning.md) to reference the stable and latest V1 action
+## Advanced Options
+```yaml
+- uses: procurify/net-negative-loc-action@v1
+  with:
+    token: ${{ github.token }}
+    slack_webhook: ${{ secrets.SLACK_WEBHOOK }}  # The slack webhook where this action will post to
+    directory: './packages/angular'              # The directory to run the report in
+    checkpoint_tag: 2021-Q1                      # A git tag that the report will always check the diff of line of codes against
+    checkpoint_title: 2021 1st Quarter           # The title of the checkpoint, to be shown in the report
+    exclude_dir: node_modules,dist,build         # List of dir to exclude, comma-separated
+    exclude_ext: json,md                         # List of extensions to exclude, comma-separated
+    include_ext: tsx,jsx                         # List of extensions to include, comma-separated
+    slack_release_diff_breakdown: true           # Show the breakdown of the diff by extension in the report between the latest release and the last release
+    slack_checkpoint_diff_breakdown: true        # Show the breakdown of the diff by extension in the report between the latest release and the checkpoint
+```
