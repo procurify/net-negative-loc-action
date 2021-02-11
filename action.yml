@@ -13,6 +13,8 @@ inputs:
     default: ${{ github.token }}
   slack_webhook:
     description: Slack webhook
+  directory:
+    description: directory to run cloc
   source_ref:
     description: source ref
   exclude_dir:

@@ -2,7 +2,7 @@ require('./sourcemap-register.js');module.exports =
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
-/***/ 3109:
+/***/ 5008:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -39,11 +39,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.gitFetchRefs = exports.getClocFromRef = exports.clocFolder = void 0;
 const core = __importStar(__nccwpck_require__(2186));
-const github = __importStar(__nccwpck_require__(5438));
 const execa_1 = __importDefault(__nccwpck_require__(5447));
-const simple_git_1 = __importDefault(__nccwpck_require__(1477));
 const path_1 = __importDefault(__nccwpck_require__(5622));
+const simple_git_1 = __importDefault(__nccwpck_require__(1477));
 const git = simple_git_1.default();
 const clocFolder = (folder, excludeDir, excludeExt, includeExt) => __awaiter(void 0, void 0, void 0, function* () {
     try {
@@ -54,6 +54,7 @@ const clocFolder = (folder, excludeDir, excludeExt, includeExt) => __awaiter(voi
             options.push(`--exclude-dir=${excludeDir}`);
         if (excludeExt)
             options.push(`--exclude-ext=${excludeExt}`);
+        core.info(`cloc ${[...options, '--json', folder].join(' ')}`);
         const { stdout } = yield execa_1.default(path_1.default.resolve(__dirname, '../bin/cloc'), [
             ...options,
             '--json',
@@ -62,13 +63,83 @@ const clocFolder = (folder, excludeDir, excludeExt, includeExt) => __awaiter(voi
         return JSON.parse(stdout);
     }
     catch (e) {
-        return {};
+        return null;
     }
 });
+exports.clocFolder = clocFolder;
 const getClocFromRef = (ref) => __awaiter(void 0, void 0, void 0, function* () {
+    core.startGroup(`Get Cloc from: ${ref}`);
     yield git.checkout(ref, ['-f']);
-    return clocFolder('.', core.getInput('exclude_dir') || '', core.getInput('exclude_ext') || '', core.getInput('include_ext') || '');
+    const cloc = yield exports.clocFolder(core.getInput('directory') || '.', core.getInput('exclude_dir') || '', core.getInput('exclude_ext') || '', core.getInput('include_ext') || '');
+    core.info(JSON.stringify(cloc));
+    core.endGroup();
+    return cloc;
 });
+exports.getClocFromRef = getClocFromRef;
+const gitFetchRefs = (refs) => __awaiter(void 0, void 0, void 0, function* () {
+    core.startGroup('Fetching');
+    const fetchOptions = [
+        '--no-tags',
+        '--prune',
+        '--progress',
+        '--no-recurse-submodules',
+        '--depth=1',
+        `origin`
+    ];
+    for (const ref of refs) {
+        fetchOptions.push(...[
+            `+refs/tags/${ref}*:refs/tags/${ref}*`,
+            `+refs/heads/${ref}*:refs/remotes/origin/${ref}*`
+        ]);
+    }
+    core.info(`git fetch ${fetchOptions.join(' ')}`);
+    const fetchResults = yield git.fetch(fetchOptions);
+    core.debug(JSON.stringify(fetchResults));
+    core.endGroup();
+    return git.fetch(fetchOptions);
+});
+exports.gitFetchRefs = gitFetchRefs;
+
+
+/***/ }),
+
+/***/ 3109:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    Object.defineProperty(o, k2, { enumerable: true, get: function() { return m[k]; } });
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || function (mod) {
+    if (mod && mod.__esModule) return mod;
+    var result = {};
+    if (mod != null) for (var k in mod) if (k !== "default" && Object.prototype.hasOwnProperty.call(mod, k)) __createBinding(result, mod, k);
+    __setModuleDefault(result, mod);
+    return result;
+};
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+const core = __importStar(__nccwpck_require__(2186));
+const github = __importStar(__nccwpck_require__(5438));
+const helpers_1 = __nccwpck_require__(5008);
 function run() {
     var _a, _b, _c, _d, _e, _f;
     return __awaiter(this, void 0, void 0, function* () {
@@ -76,8 +147,6 @@ function run() {
         const octokit = github.getOctokit(myToken);
         const owner = (_a = process.env.GITHUB_REPOSITORY) === null || _a === void 0 ? void 0 : _a.split('/')[0];
         const repo = (_b = process.env.GITHUB_REPOSITORY) === null || _b === void 0 ? void 0 : _b.split('/')[1];
-        core.info(owner);
-        core.info(repo);
         const releases = yield octokit.repos.listReleases({
             owner,
             repo,
@@ -85,17 +154,19 @@ function run() {
         });
         const latestReleaseTag = (_d = (_c = releases.data) === null || _c === void 0 ? void 0 : _c[0]) === null || _d === void 0 ? void 0 : _d.tag_name;
         const lastReleaseTag = (_f = (_e = releases.data) === null || _e === void 0 ? void 0 : _e[1]) === null || _f === void 0 ? void 0 : _f.tag_name;
-        const fetch = yield git.fetch([
-            `origin`,
-            `+refs/tags/${latestReleaseTag}*:refs/tags/${latestReleaseTag}*`,
-            `+refs/heads/${latestReleaseTag}*:refs/remotes/origin/${latestReleaseTag}*`,
-            `+refs/tags/${lastReleaseTag}*:refs/tags/${lastReleaseTag}*`,
-            `+refs/heads/${lastReleaseTag}*:refs/remotes/origin/${lastReleaseTag}*`,
-            '--depth=1'
-        ]);
-        core.info(JSON.stringify(fetch));
-        core.info(JSON.stringify(yield getClocFromRef(latestReleaseTag)));
-        core.info(JSON.stringify(yield getClocFromRef(lastReleaseTag)));
+        const sourceRef = core.getInput('source_ref');
+        /** Git fetch */
+        yield helpers_1.gitFetchRefs([latestReleaseTag, lastReleaseTag, sourceRef]);
+        /** Calculate LoC Difference */
+        const latestCloc = yield helpers_1.getClocFromRef(latestReleaseTag);
+        const lastCloc = yield helpers_1.getClocFromRef(latestReleaseTag);
+        const sourceCloc = yield helpers_1.getClocFromRef(sourceRef);
+        if (!latestCloc || !lastCloc || !sourceCloc)
+            return;
+        const diffLocFromLast = latestCloc.SUM.code - lastCloc.SUM.code;
+        const diffLocFromSource = latestCloc.SUM.code - sourceCloc.SUM.code;
+        core.info(diffLocFromLast.toString());
+        core.info(diffLocFromSource.toString());
     });
 }
 run();
