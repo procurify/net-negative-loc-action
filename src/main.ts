@@ -1,46 +1,6 @@
 import * as core from '@actions/core'
 import * as github from '@actions/github'
-import execa from 'execa'
-import simpleGit, {SimpleGit} from 'simple-git'
-import path from 'path'
-
-const git: SimpleGit = simpleGit()
-
-const clocFolder = async (
-  folder: string,
-  excludeDir: string,
-  excludeExt: string,
-  includeExt: string
-): Promise<Object> => {
-  try {
-    const options = []
-
-    if (includeExt) options.push(`--include-ext=${includeExt}`)
-    if (excludeDir) options.push(`--exclude-dir=${excludeDir}`)
-    if (excludeExt) options.push(`--exclude-ext=${excludeExt}`)
-
-    const {stdout} = await execa(path.resolve(__dirname, '../bin/cloc'), [
-      ...options,
-      '--json',
-      folder
-    ])
-
-    return JSON.parse(stdout)
-  } catch (e) {
-    return {}
-  }
-}
-
-const getClocFromRef = async (ref: string): Promise<Object> => {
-  await git.checkout(ref, ['-f'])
-
-  return clocFolder(
-    '.',
-    core.getInput('exclude_dir') || '',
-    core.getInput('exclude_ext') || '',
-    core.getInput('include_ext') || ''
-  )
-}
+import {getClocFromRef, gitFetchRefs, sendSlackMessage} from './helpers'
 
 async function run(): Promise<void> {
   const myToken = core.getInput('token')
@@ -50,9 +10,6 @@ async function run(): Promise<void> {
   const owner = process.env.GITHUB_REPOSITORY?.split('/')[0] as string
   const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] as string
 
-  core.info(owner)
-  core.info(repo)
-
   const releases = await octokit.repos.listReleases({
     owner,
     repo,
@@ -61,20 +18,50 @@ async function run(): Promise<void> {
 
   const latestReleaseTag = releases.data?.[0]?.tag_name
   const lastReleaseTag = releases.data?.[1]?.tag_name
+  const checkpointTag = core.getInput('checkpoint_tag')
 
-  const fetch = await git.fetch([
-    `origin`,
-    `+refs/tags/${latestReleaseTag}*:refs/tags/${latestReleaseTag}*`,
-    `+refs/heads/${latestReleaseTag}*:refs/remotes/origin/${latestReleaseTag}*`,
-    `+refs/tags/${lastReleaseTag}*:refs/tags/${lastReleaseTag}*`,
-    `+refs/heads/${lastReleaseTag}*:refs/remotes/origin/${lastReleaseTag}*`,
-    '--depth=1'
-  ])
+  /** Git fetch */
+  await gitFetchRefs([latestReleaseTag, lastReleaseTag, checkpointTag])
 
-  core.info(JSON.stringify(fetch))
+  /** Calculate LoC Difference */
+  const latestCloc = await getClocFromRef(latestReleaseTag)
+  const lastCloc = await getClocFromRef(latestReleaseTag)
+  const checkpointCloc = await getClocFromRef(checkpointTag)
 
-  core.info(JSON.stringify(await getClocFromRef(latestReleaseTag)))
-  core.info(JSON.stringify(await getClocFromRef(lastReleaseTag)))
+  if (!latestCloc || !lastCloc) return
+
+  const diffLocFromLast = latestCloc.SUM.code - lastCloc.SUM.code
+  core.exportVariable('DIFF_LOC_RELEASE', diffLocFromLast)
+
+  let diffLocFromCheckpoint
+  if (checkpointCloc) {
+    diffLocFromCheckpoint = latestCloc.SUM.code - checkpointCloc.SUM.code
+
+    core.exportVariable('DIFF_LOC_CHECKPOINT', diffLocFromCheckpoint)
+  }
+
+  const slackWebhook = core.getInput('slack_webhook')
+
+  if (slackWebhook) {
+    core.info(core.getInput('slack_release_diff_breakdown'))
+
+    await sendSlackMessage({
+      owner,
+      repo,
+      webhookUrl: slackWebhook,
+      latestReleaseTag,
+      lastReleaseTag,
+      diffLocFromLast,
+      diffLocFromCheckpoint,
+      clocLatest: latestCloc,
+      clocLast: lastCloc,
+      clocCheckpoint: checkpointCloc || undefined,
+      showReleaseBreakdown:
+        core.getInput('slack_release_diff_breakdown') === 'true',
+      showCheckpointBreakdown:
+        core.getInput('slack_checkpoint_diff_breakdown') === 'true'
+    })
+  }
 }
 
 run()

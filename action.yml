@@ -1,6 +1,9 @@
-name: 'Line of Code Dif'
-description: ''
+name: 'Net Negative Lines of Code'
+description: 'Report the net negative lines of code between releases'
 author: 'alexcheuk'
+branding:
+  icon: 'arrow-down'
+  color: 'gray-dark'
 inputs:
   token:
     description: >
@@ -11,16 +14,24 @@ inputs:
       Also when generating a new PAT, select the least scopes necessary.
       [Learn more about creating and using encrypted secrets](https://help.github.com/en/actions/automating-your-workflow-with-github-actions/creating-and-using-encrypted-secrets)
     default: ${{ github.token }}
-  slack_webhook:
-    description: Slack webhook
-  source_ref:
-    description: source ref
+  directory:
+    description: directory to run cloc
+  checkpoint_tag:
+    description: checkpoint tag
   exclude_dir:
     description: exclude dir
   exclude_ext:
     description: exclude ext
   include_ext:
     description: exclude ext
+  slack_webhook:
+    description: Slack webhook
+  slack_release_diff_breakdown:
+    description: Show a breakdown between the current release and the release before that
+    default: false
+  slack_checkpoint_diff_breakdown:
+    description: Show a breakdown between the current release and the release before that
+    default: false
 runs:
   using: 'node12'
   main: 'dist/index.js'

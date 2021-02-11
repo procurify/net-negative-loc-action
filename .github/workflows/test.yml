@@ -22,6 +22,6 @@ jobs:
       - uses: ./
         with:
           token: ${{ github.token }}
-          source_ref: net-negative-angular-source
+          checkpoint_tag: net-negative-angular-source
           exclude_dir: node_modules,dist
           exclude_ext: json
