@@ -9,9 +9,9 @@
     "format": "prettier --write **/*.ts",
     "format-check": "prettier --check **/*.ts",
     "lint": "eslint src/**/*.ts",
-    "prepackage": "npm run build",
+    "prepackage": "yarn build",
     "package": "ncc build --source-map --license licenses.txt",
-    "all": "npm run build && npm run format && npm run lint && npm run package"
+    "all": "yarn build && yarn format && yarn lint && yarn package"
   },
   "repository": {
     "type": "git",
