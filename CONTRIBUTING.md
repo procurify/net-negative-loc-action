@@ -7,9 +7,12 @@ Please take some time to read the following guidelines we've set to make the con
 By participating and contributing to this project, you agree to uphold our [Code of Conduct](https://github.com/procurify/net-negative-loc-action/blob/main/CODE_OF_CONDUCT.md).
 
 ## Getting started
-Please use the search to see if any exisitng Issues or PRs match your problem before creating your own
+Please use the search to see if any existing Issues or PRs match your problem before creating your own
 
 We try to resolve issues in a timely manner, but if you feel like your issue is taking too long, feel free to leave a comment or ping a reminder to draw attention
+
+## Coding Style
+We use [Prettier](https://prettier.io/) as our code linter.
 
 ## Issue tracker
 If you wish to add changes to the core functionality of the project please email our development team at development@procurify.com
