@@ -29,7 +29,7 @@
     "@types/node-fetch": "^2.5.8",
     "axios": "^0.21.1",
     "execa": "^5.0.0",
-    "node-fetch": "^2.6.1",
+    "node-fetch": "^3.3.0",
     "simple-git": "^2.34.2"
   },
   "devDependencies": {
