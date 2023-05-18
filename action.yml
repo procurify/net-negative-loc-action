@@ -35,5 +35,5 @@ inputs:
     description: Show a breakdown between the current release and the release before that
     default: false
 runs:
-  using: 'node12'
+  using: 'node16'
   main: 'dist/index.js'
